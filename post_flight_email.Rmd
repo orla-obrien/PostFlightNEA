@@ -1,0 +1,295 @@
+---
+title: "New England Aquarium Aerial Survey: August 29, 2021"
+date: "`r format(Sys.Date(), '%B%Y')"
+subtitle: "RI/MA Wind Energy Areas"
+output: pdf_document
+header-includes:
+  - \usepackage{titling}
+  - \pretitle{\begin{center}
+    \includegraphics[width=2in,height=2in]{Acool_logo.png}\LARGE\\}
+  - \posttitle{\end{center}}
+---
+
+```{r setup, include=FALSE}
+
+library(raster)
+library(tidyverse)
+library(viridis)
+library(knitr)
+library(sf)
+library(marmap)
+library(lubridate)
+library(glue)
+library(rgdal)
+library(grid)
+library(kableExtra)
+library(readtext)
+library(pdftools)
+library(mapview)
+library(leaflet)
+library(tinytex)
+
+## source numbers2words function
+source("https://gist.githubusercontent.com/hack-r/22104543e2151519c41a8f0ce042b31c/raw/01731f3176b4ee471785639533d38eda4790ab77/numbers2words.r")
+
+## source kenney code and mapping functions
+source("C://Users//oobrien//Documents//R_Work_Directory//PostFlightReport//PostFlightReport_InProgress.R")
+
+
+```
+
+```{r pressure, echo=FALSE, warning = FALSE, message = FALSE}
+
+surveymap
+
+```
+
+```{r survey date, include=FALSE}
+dat.date <- dplyr::select(dat, year, month, day)
+
+dat.date <- dat.date %>%
+  mutate(date = make_date(year, month, day))
+
+dat.date$date <- as.Date(dat.date$date)
+surveyday <- weekdays(unique(dat.date$date, na.rm = TRUE))
+dat.date$date <- as.Date(dat.date$date, format = "%Y-%m-%d")
+text.date <- unique(format(dat.date$date, "%B %d, %Y"))
+text.date.short <- unique(format(dat.date$date, "%B %d"))
+```
+
+```{r survey summary, include=FALSE, warning= FALSE, message = FALSE}
+#beaufort
+min_beaufort <- min(dat$beaufort, na.rm = TRUE) 
+max_beaufort <- max(dat$beaufort,na.rm = TRUE) 
+beauf <- if (min_beaufort == max_beaufort){
+  paste("was", min_beaufort, sep= " ")
+} else {
+  paste("ranged from", min_beaufort,"to", max_beaufort, sep=" ")
+}
+    
+#weather
+dat$wx <- str_replace_all(dat$wx, c(
+  "H" = "haze",
+  "C" = "clear",
+  "F" = "fog",
+  "G" = "gray",
+  "P" = "patchy fog",
+  "S" = "snow"
+  
+))
+wx_list <- dat %>% 
+  #select(wx) %>% 
+  filter(nchar(wx)>2) %>% 
+  distinct(wx)
+wx_count <- count(wx_list)
+wx_pf <- if (wx_count == 1){
+  paste("was", wx_list, sep= " ")
+} else  if (wx_count == 2) {
+  paste("ranged from", wx_list[1,],"to", wx_list[2,], sep=" ")
+} else if (wx_count == 3) {
+    paste("ranged from", wx_list[1,],"to", wx_list[2,],"to", wx_list[3,], sep=" ")
+} else if (wx_count == 4) {
+    paste("ranged from", wx_list[1,],"to", wx_list[2,], wx_list[3,], wx_list[4,], sep=" ")
+}
+trackno <- length(unique(dat$legno))
+ trackno <- dat %>% 
+   filter(legno != "")
+  
+trackno <- length(unique(trackno$legno))
+  
+  ## how many tracklines
+  surv_legno <- dat %>%
+ distinct(legno) %>%
+  drop_na() %>%
+  count()
+  
+  
+## what was the beaufort  
+surv_beau_min <- dat %>%
+  summarise(minimum = min(beaufort))
+
+surv_beau_max <- dat %>%
+  summarise(maximum = max(beaufort))
+
+egnum <- dat %>% 
+  filter(speccode == "RIWH") %>% 
+  summarize(n = sum(number))   
+
+  egs <- numbers2words(egnum)
+  
+eg_statement <- if (egnum > 0) {
+  paste("See table below for right whale sightings details.")
+}
+```
+
+\vspace{0cm}
+
+```{r species summary, echo = FALSE, warning= FALSE, message = FALSE}
+
+megafauna <- function(dat, speccode){
+  
+  dat %>%
+    filter(speccode == "RIWH" | speccode == "HUWH" | speccode == "MIWH" |
+           speccode == "UNLW" | speccode == "SADO" | speccode == "WSDO" |
+           speccode == "UNDO" | speccode == "UNSE" | speccode == "FIWH" | 
+           speccode == "BEWH" | speccode == "BLWH" | speccode == "BODO" | 
+           speccode == "GRAM" | speccode == "GRSE" | speccode == "HAPO" |
+           speccode == "HASE" | speccode == "KIWH" | speccode == "LETU" |
+           speccode == "LFPW" | speccode == "MANA" | speccode == "OBDO" |
+           speccode == "PINN" | speccode == "PIWH" | speccode == "SEWH" |
+           speccode == "SFPW" | speccode == "SPWH" | speccode == "UNFS" )
+}
+dat <- megafauna(dat, speccode)
+dat$number <- as.numeric(dat$number)
+species <- dat %>% 
+  group_by(speccode) %>% 
+  dplyr::summarise('Total Number' = sum(number)) %>% 
+  rename('Species' = 'speccode') %>% 
+  na.omit()
+kenney2commonNoLatin <- function(speccode){
+  str_replace_all(speccode,
+                  c("BLWH" = "Blue Whale", 
+                    "BOWH" = "Bowhead Whale", 
+                    "FIWH" = "Fin Whale",
+                    "HUWH" = "Humpback Whale",
+                    "RIWH" = "North Atlantic Right Whale", 
+                    "SEWH" = "Sei Whale",
+                    "SPWH" = "Sperm Whale", 
+                    "UNBA" = "Unidentified Balaenoptera",
+                    "UNFS" = "Unidentified Fin or Sei Whale", 
+                    "UNLW" = "Unidentified Large Whale", 
+                    "UNRO" = "Unidentified Rorqual", 
+                    "UNWH" = "Unidentified Whale",
+                    "BEWH" = "Beaked Whale", 
+                    "BLBW" = "Blainville's Beaked Whale", 
+                    "GEBW" = "Gervais' Beaked Whale", 
+                    "GOBW" = "Cuvier's Beaked Whale", 
+                    "KIWH" = "Killer Whale", 
+                    "MIWH" = "Minke Whale", 
+                    "NBWH" = "Northern Bottlenose Whale", 
+                    "SOBW" = "Sowerby's Beaked Whale", 
+                    "TRBW" = "True's Beaked Whale", 
+                    "UNBW" = "Unidentified Beaked Whale", 
+                    "UNMW" = "Unidentified Medium Whale", 
+                    "ASDO" = "Atlantic Spotted Dolphin", 
+                    "BELU" = "Beluga",
+                    "BODO" = "Bottlenose Dolphin", 
+                    "CLDO" = "Clymene Dolphin", 
+                    "GRAM" = "Risso's Dolphin",
+                    "HAPO" = "Harbor Porpoise", 
+                    "OBDO" = "Offshore Bottlenose Dolphin", 
+                    "PIWH" = "Pilot Whale", 
+                    "RTDO" = "Rough-Toothed Dolphin", 
+                    "SADO" = "Common Dolphin", 
+                    "SNDO" = "Spinner Dolphin", 
+                    "SPDO" = "Spotted Dolphin", 
+                    "STDO" = "Striped Dolphin", 
+                    "UNBD" = "Unidentified Beaked Dolphin",
+                    "UNBF" = "Unidentified Blackfish",
+                    "UNCW" = "Unidentified Common or White-sided Dolphin",
+                    "UNDO" = "Unidentified Dolphin/Porpoise",
+                    "UNGD" = "Spotted or Bottlenose Dolphin",
+                    "UNST" = "Unidentified *Stenella*",
+                    "WBDO" = "White-Beaked Dolphin",
+                    "WSDO" = "Atlantic White-Sided Dolphin", 
+                    "BESE" = "Bearded Seal", 
+                    "GRSE" = "Gray Seal", 
+                    "HASE" = "Harbor Seal", 
+                    "HGSE" = "Harp or Gray Seal",
+                    "HOSE" = "Hooded Seal", 
+                    "HPSE" = "Harp Seal", 
+                    "MANA" = "Manatee", 
+                    "RISE" = "Ringed Seal", 
+                    "UNSE" = "Unidentified Seal", 
+                    "GRTU" = "Green Turtle", 
+                    "LETU" = "Leatherback Turtle", 
+                    "LOTU" = "Loggerhead Turtle", 
+                    "RITU" = "Kemp's Ridley Turtle", 
+                    "UNTU" = "Unidentified Turtle", 
+                    "BASH" = "Basking Shark", 
+                    "BLSH" = "Blue Shark", 
+                    "GHSH" = "Great Hammerhead Shark", 
+                    "HHSH" = "Hammerhead Shark", 
+                    "UNSH" = "Unidentified/Other Shark", 
+                    "WHSH" = "Whale Shark", 
+                    "WTSH" = "White Shark", 
+                    "OCSU" = "Ocean Sunfish", 
+                    "UNCE" = "Unidentified Cetacean", 
+                    "UNID" = "Unidentified Animal", 
+                    "UNMM" = "Unidentified Marine Mammal",
+                    "TUNS" = "Tuna"))
+}
+
+species$Species <- kenney2commonNoLatin(species$Species)
+
+# makes df and sorts alphabetically
+species <- as.data.frame(species) 
+species <- species %>% arrange(Species, .by_group = TRUE)
+  
+
+spp_table <- function(df){
+  #if no sightings add new row and paste No marine mammals sighted
+    if(nrow(df) == 0) {
+    df <- df[nrow(df) + 1, ] 
+    df[1,1] <- paste0("No large marine mammals sighted")
+    df[is.na(df)] <- ""
+    df
+    } else {
+    df
+    }
+}
+
+species <- spp_table(species)
+
+rows <- (nrow(species))
+
+# split_table <- function(spp){
+#   if(rows > 6){
+#   t1 <- spp[1:ceiling(rows/2),]
+#   t2 <- spp[ceiling(rows/2)+1:(rows-ceiling(rows/2)),]
+#   knitr::kable(list(t1, t2), caption= "Species Sighted", booktabs = TRUE, row.names = FALSE) %>% 
+#   kable_styling(font_size = 9, latex_options = "hold_position")
+#   } else {
+#   kbl(spp, booktabs = T, longtable = T, caption = "Species Sighted", linesep = "") %>%
+#   kable_styling(latex_options = c("hold_position", "repeat_header"), full_width = F, font_size = 9)
+#   }
+# }
+
+#split_table(species)
+```
+
+
+On `r surveyday`, `r text.date.short`, the New England Aquarium (NEAq) flew a survey of MA/RI wind energy areas. NEAQ flew `r trackno` tracklines. Beaufort sea stage `r beauf`. `r egs` right whales were sighted during this flight. Sightings listed in table(s) below.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+
+ kbl(species, booktabs = T, longtable = T, caption = "Species Sighted", linesep = "") %>%
+ kable_styling(latex_options = c("hold_position", "repeat_header"), full_width = F, font_size = 9)
+
+
+```
+
+`r eg_statement`
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+
+rw_sight_table <- dat %>%
+  filter(speccode == "RIWH") %>%
+  dplyr::select(month, day, year, time, lat, long, number) %>%
+  unite(Date, month, day, year, sep = "/") %>%
+  rename(Date = Date, Time = time, 
+         Latitude = lat, Longitude = long,
+         Number = number)
+
+colnames(rw_sight_table) <- c("Date", "Time", "Latitude", "Longitude", "Number of individuals") 
+
+if (egnum > 0) {
+  paste(kable(rw_sight_table, 
+      booktabs = T) %>%
+  kableExtra::kable_styling(latex_options = "hold_position"))
+} 
+
+
+
+```
+
