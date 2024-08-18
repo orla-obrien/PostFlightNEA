@@ -3,21 +3,33 @@ library(leaflet)
 library(sf)
 library(mapview)
 library(webshot)
+library(htmltools)
+library(lubridate)
+library(htmlwidgets)
+library(leaflegend)
+library(leaflet.providers)
+#webshot::install_phantomjs(force=TRUE)
+#install.packages("leaflet.providers")
 
-#webshot::install_phantomjs()
+## General, Directed, or Condensed survey? ##
 
+# Write "G", "D", or "C" 
+SurveyType <- "G"
 
+Survey_Area <- "Hudson Canyon"
+# NOAA Flight?
 
-setwd("C:\\Users\\oobrien\\Documents\\R_Work_Directory\\PostFlightReport")
+NOAA_Yes_No <- "Yes"
+
+setwd("~/Documents/R_Work_Directory/NEA_PostFlight")
 target_dir <- paste(getwd(), "/output/", sep="")
-filenames <- list.files(".//data//", pattern="*RAW.CSV")
+filenames <- list.files(".//data//", pattern="*URI.csv")
 date <- substr(filenames, 1, 8)
 date <- max(date)
 
-filename <- paste(".//data//", date, "_RAW.CSV", sep="")
+filename <- paste(".//data//", date, "_URI.csv", sep="")
 dat <- read.csv(filename)
 
-#dat <- read.csv("20220520_RAW.CSV")
 dat <- dat %>%
   filter(dat$long < 0) #%>%
   #filter(dat$legtype != 0) 
@@ -29,40 +41,206 @@ max_lat <- max(dat$lat)
 mid_lat <- mean(c(min(dat$lat), max(dat$lat)))
 mid_long <- mean(c(min(dat$long), max(dat$long)))
 
+dat.date <- dplyr::select(dat, year, month, day)
+
+dat.date <- dat.date %>%
+  mutate(date = make_date(year, month, day))
+
+dat.date$date <- as.Date(dat.date$date[1])
+surveyday <- weekdays(unique(dat.date$date, na.rm = TRUE))
+dat.date$date <- as.Date(dat.date$date[1], format = "%Y-%m-%d")
+text.date <- unique(format(dat.date$date, "%B %d, %Y"))
+text.date.short <- unique(format(dat.date$date, "%B %d"))
+
 
 
 ## use this url: https://apps-nefsc.fisheries.noaa.gov/cgi-bin/mammalmaps/xmlgenDMA.pl
-## copy any relevant DMAs below
+url_dma <- 'https://services2.arcgis.com/C8EMgrsFcRFL6LrL/arcgis/rest/services/NEFSC_Dynamic_Management_Areas/FeatureServer/0/query/?where=1%3D1&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&resultType=none&distance=0.0&units=esriSRUnit_Meter&relationParam=&returnGeodetic=false&outFields=*&returnGeometry=true&returnCentroid=false&featureEncoding=esriDefault&multipatchOption=xyFootprint&maxAllowableOffset=&geometryPrecision=&outSR=&defaultSR=&datumTransformation=&applyVCSProjection=false&returnIdsOnly=false&returnUniqueIdsOnly=false&returnCountOnly=false&returnExtentOnly=false&returnQueryGeometry=false&returnDistinctValues=false&cacheHint=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&having=&resultOffset=&resultRecordCount=&returnZ=false&returnM=false&returnExceededLimitFeatures=true&quantizationParameters=&sqlFormat=none&f=pgeojson&token='
 
-dma1_lat <- c(0, 
-              0, 
-              0, 
+# read in dma data
+dma <- st_read(url_dma, quiet = TRUE)
+
+if(nrow(dma)>0){
+  
+  # check expiration times
+  e_dates <- as.Date(as.POSIXct(as.character(dma$EXPDATE), format = "%d-%b-%Y %H:%M:%S", tz = 'UTC'))
+  
+  # if bad DMAs exist, remove them
+  if(TRUE %in% c(e_dates<Sys.Date())){
+    
+    # indices of bad DMAs
+    i_bad <- which(e_dates<Sys.Date())
+    
+    # number of expired DMAs
+    n_bad <- length(i_bad)
+    
+    # names of bad DMAs
+    names_bad <- as.character(dma$NAME[i_bad])
+    
+    # issue warning
+    message("The following ", n_bad, " DMA(s) were detected:")
+    message(paste(names_bad, collapse = '\n'))
+    message("These will be removed from WhaleMap")
+    
+    # remove expired DMAs
+    dma <- dma[-i_bad,]
+    
+  }
+}
+
+## copy any relevant DMAs below
+dma1_lat <- c(0,
+              0,
+              0,
               0) %>%
   as.data.frame() %>%
   rename("lat" = ".")
 
-dma1_long <- c(0, 
-               0, 
-               0, 
-               0)
+dma1_long <- c(-0,
+               -0,
+               -0,
+               -0)
 dma1 <- cbind(dma1_lat, dma1_long) %>%
   as.data.frame() #
 
-dma2_lat <- c(0, 
-              0, 
-              0, 
+dma2_lat <- c(0,
+              0,
+              0,
               0) %>%
   as.data.frame() %>%
   rename("lat" = ".")
 
-dma2_long <- c(0, 
-               0, 
-               0, 
-               0)
+dma2_long <- c(-0,
+               -0,
+               -0,
+               -0)
 dma2 <- cbind(dma2_lat, dma2_long) %>%
-  as.data.frame() 
+  as.data.frame()
 
-## replace Kenney SPECCODE with common names and NO scientific names
+dma3_lat <- c(0,
+              0,
+              0,
+              0) %>%
+  as.data.frame() %>%
+  rename("lat" = ".")
+
+dma3_long <- c(-0,
+               -0,
+               -0,
+               -0)
+dma3 <- cbind(dma3_lat, dma3_long) %>%
+  as.data.frame()
+
+
+
+SMA_live <- if (dat$month[1] == 11 ) {
+  st_read(".//shapefiles//SNE_SMA.shp")
+}else if (dat$month[1] == 12 ) {
+  st_read(".//shapefiles//SNE_SMA.shp")
+}else if (dat$month[1] == 1 ) {
+  st_read(".//shapefiles//SNE_SMA.shp")
+}else if (dat$month[1] == 2 ) {
+  st_read(".//shapefiles//SNE_SMA.shp")
+}else if (dat$month[1] == 3 ) {
+  st_read(".//shapefiles//SNE_SMA.shp")
+}else if (dat$month[1] == 4 ) {
+  st_read(".//shapefiles//SNE_SMA.shp")
+}else if (dat$month[1] == 5 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 6 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 7 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 8 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 9 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 10 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}
+
+CCB_SMA <- if (dat$month[1] == 11 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 12 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 1 ) {
+  st_read(".//shapefiles//CCB_SMA.shp")
+}else if (dat$month[1] == 2 ) {
+  st_read(".//shapefiles//CCB_SMA.shp")
+}else if (dat$month[1] == 3 ) {
+  st_read(".//shapefiles//CCB_SMA.shp")
+}else if (dat$month[1] == 4 ) {
+  st_read(".//shapefiles//CCB_SMA.shp")
+}else if ((dat$month[1] == 5 & dat$day[1] < 16)) {
+  st_read(".//shapefiles//CCB_SMA.shp")
+}else if ((dat$month[1] == 5 & dat$day[1] > 16)) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 6 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 7 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 8 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 9 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 10 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}
+
+RP_SMA <- if (dat$month[1] == 11 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 12 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 1 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 2 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 3 ) {
+  st_read(".//shapefiles//RacePointSMA.shp")
+}else if (dat$month[1] == 4 ) {
+  st_read(".//shapefiles//RacePointSMA.shp")
+}else if (dat$month[1] == 5 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 6 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 7 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 8 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 9 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 10 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}
+
+GSC_SMA <- if (dat$month[1] == 11 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 12 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 1 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 2 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 3 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 4 ) {
+  st_read(".//shapefiles//GSC_SMA.shp")
+}else if (dat$month[1] == 5 ) {
+  st_read(".//shapefiles//GSC_SMA.shp")
+}else if (dat$month[1] == 6 ) {
+  st_read(".//shapefiles//GSC_SMA.shp")
+}else if (dat$month[1] == 7 ) {
+  st_read(".//shapefiles//GSC_SMA.shp")
+}else if (dat$month[1] == 8 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 9 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}else if (dat$month[1] == 10 ) {
+  st_read(".//shapefiles//sma_fake.shp")
+}
+
+
+#### replace Kenney SPECCODE with common names and NO scientific names ####
 kenney2commonNoLatin <- function(SPECCODE){
   str_replace_all(SPECCODE, 
                   c("BLWH" = "Blue Whale", 
@@ -99,7 +277,7 @@ kenney2commonNoLatin <- function(SPECCODE){
                     "DSWH" = "Dwarf Sperm Whale", 
                     "FKWH" = "False Killer Whale", 
                     "FRDO" = "Fraser's Dolphin", 
-                    "GRAM" = "Risso's Dolphin",
+                    "GRAM" = "Rissos Dolphin",
                     "HAPO" = "Harbor Porpoise", 
                     "LFPW" = "Long-finned Pilot Whale", 
                     "MHWH" = "Melon-Headed Whale", 
@@ -191,17 +369,22 @@ riwh_surv1 <- dat %>%
            speccode == "BEWH" | speccode == "BLWH" | speccode == "BODO" | 
            speccode == "GRAM" | speccode == "GRSE" | speccode == "HAPO" |
            speccode == "HASE" | speccode == "KIWH" | speccode == "LETU" |
-           speccode == "LFPW" | speccode == "MANA" | speccode == "OBDO" |
+           speccode == "LOTU" | speccode == "MANA" | speccode == "UNTU" |
            speccode == "PINN" | speccode == "PIWH" | speccode == "SEWH" |
-           speccode == "SFPW" | speccode == "SPWH" | speccode == "UNFS" ) %>%
+           speccode == "SFPW" | speccode == "SPWH" | speccode == "UNFS" |
+           speccode == "GRWH"| speccode == "GOBW"| speccode == "TRBW" |
+           speccode == "UNBW") %>%
   mutate(new.speccode = kenney2commonNoLatin(speccode)) %>%
   arrange(desc(number))
 
 
 
 
+#### color scheme ####
 mm_levs <-  
-  c(
+  c("Cuvier's Beaked Whale",
+    "True's Beaked Whale",
+    "Unidentified Beaked Whale",
     'Right Whale',
     'Humpback Whale',
     'Fin Whale',
@@ -213,7 +396,7 @@ mm_levs <-
     'Unidentified Fin or Sei Whale',
     'Common Dolphin', 
     'Bottlenose Dolphin',
-    'Atlantic White-sided Dolphin',
+    'Atlantic White-Sided Dolphin',
     'Pilot Whale',
     'Harbor Porpoise',
     'Striped Dolphin',
@@ -226,31 +409,35 @@ mm_levs <-
     'Loggerhead Turtle',
     'Kemps Ridley Turtle',
     'Unidentified Turtle')
+
 mm_pal <-  
-  c("#FF0B0B",
+  c("#b15928",
+    "#E3FA20",
+    "#252525",
+    "#FF0B0B",
     "#0156FF",
     "#068100",
     "#E3FA20",
     "#D089F4",
-    "#8dd3c7",
+    "#ae017e",
     "#80b1d3",
     "#252525",
     "#252525",
     "#FF850B",
-    "#b2df8a",
-    "#ffff99",
+    "slategrey",
+    "#ae017e",
     "#6a3d9a",
     "#b15928",
     "#fb9a99",
-    "#fb8072",
+    "#33FFFF",
     "#f0f0f0",
     "#33FFFF",
     "#662506",
     "#C0BDC1",
-    "#99d8c9",
+    "darkseagreen3",
     "#ae017e",
     "#9ebcda",
-    "#111011" 
+    "brown" 
     
   )
 
@@ -258,63 +445,90 @@ mm_pal <-
 sightColors <-colorFactor(palette = mm_pal, domain = mm_levs, ordered = TRUE) 
 
 
-statesf <- st_read("C://Users//oobrien//Documents//GIS//States_DOT_unkwn.shp")
-#graticule <- st_read("C://Users//oobrien//Documents//R_Work_Directory//PostFlightReport//GraticuleDegrees.shp")
-#base <- st_read(
-#  "./images/MA_Coastal_Zone/MA_Coastal_Zone_Boundary.shp")
+#### Map code ####
+#statesf <- st_read(".//shapefiles//NAmerica_Union.shp")
+leasesf <- st_read(".//shapefiles//BOEMWIndLeaseOutlines_12_6_2022.shp")
+shiplanessf <- st_read(".//shapefiles//MORIS_ShipLanes.shp")
 
-
-#my_title <- ("Active SMAs in red, active DMAs or Slow Zones in yellow")
-#my_title <- tags$p(tags$style("p {color: black; font-size:14px}"),
-#                   tags$b("Active SMAs in red, active DMAs or Slow Zones in yellow
-#                         "))
 
 surveymap <- 
-  leaflet(options = leafletOptions(zoomSnap = 0.05, zoomDelta = 0.10)) %>%
-  # add ocean basemap
-  addProviderTiles(providers$Esri.OceanBasemap) %>%
-  
-  # add another layer with place names
-  
-    addPolygons(data = statesf, color = "tan", fill = "grey", weight = 0.5, fillOpacity=1) %>% 
-    addProviderTiles(providers$Hydda.RoadsAndLabels, group = 'Place names') %>%
-fitBounds(
+  leaflet(options = leafletOptions(zoomSnap = 0.25, zoomDelta = 0.25, zoomControl=FALSE)) %>%
+
+setMaxBounds(
   lng1 = min_long,
   lat1 = min_lat,
   lng2 = max_long,
   lat2 = max_lat
 ) %>%
+  
+  setView(lng = mid_long, lat = mid_lat, zoom = 9)  %>%
+  
+  addPolygons(data = dma, color = "yellow", weight = 0.5, fillColor = "yellow") %>%
+  addPolygons(lng=dma1$dma1_long, lat=dma1$lat, color="yellow", weight=0.5, fillColor="yellow")%>%
+
+
+  addPolygons(lng=dma2$dma2_long, lat=dma2$lat, color="yellow", weight=0.5, fillColor="yellow")%>%
+
+  addPolygons(lng=dma3$dma3_long, lat=dma3$lat, color="yellow", weight=0.5, fillColor="yellow")%>%
+
+  addPolygons(data=leasesf, color = "white", weight=2, fill=FALSE) %>%
+  
+#  addPolygons(data=shiplanessf, color = "black", weight = 2, fillColor="darkgrey") %>%
+
+  addPolygons(data=SMA_live, color="red", weight=0.5, fillColor="red") %>%
+  addPolygons(data=RP_SMA, color="red", weight=0.5, fillColor="red") %>%
+  
+  addPolygons(data=GSC_SMA, color="red", weight=0.5, fillColor="red") %>%
+  
     addPolylines(data = dat, 
                  lng = dat$long,
                  lat = dat$lat,
                  fillColor = "black",
-                 weight = 0.75,
+                 weight = 1.75,
                  opacity = 0.5, 
                  stroke = TRUE,
-                 color = "black") %>%  
+                 color = "black") %>% 
+  addPolygons(data=CCB_SMA, color="red", weight=0.5, fillColor="red") %>%
+  # addPolylines(data = dat, 
+  #              lng = dat$long,
+  #              lat = dat$lat,
+  #              fillColor = "black",
+  #              weight = 1.25,
+  #              opacity = 0.5, 
+  #              stroke = TRUE,
+  #              color = "black") %>%  
     addCircleMarkers(data = riwh_surv1, 
                      lng = riwh_surv1$long, 
                      lat = riwh_surv1$lat,
                      weight = 0.5,
                      fillColor = ~sightColors(new.speccode),
                      color = "black",
-                     radius = 4,
+                     radius = 9,
                      fillOpacity = 1,
                      stroke = TRUE,
                      # radius = NUMBER,
                      label = ~paste0(number, ' ', new.speccode),
                      group = 'Points') %>%
-    addPolygons(lng=dma1$dma1_long, lat=dma1$lat, color="yellow", weight=0.5, fillColor="yellow")%>%
-  addScaleBar(position = 'bottomright') %>%
+
   
-    
- #   addControl(my_title, position = "bottomright" ) %>%
-    addLegend("bottomleft", pal = sightColors, values = riwh_surv1$new.speccode 
-              ) %>%
-  setView(lng = (mid_long-.5), lat = mid_lat, zoom = 8) 
+  addLegendFactor(pal = sightColors, values = riwh_surv1$new.speccode,
+                  orientation = "vertical", shape="circle", width = 20, height = 20, 
+                  labelStyle= 'font-size: 18px; font-family: Arial', position= 'topright') %>%
+  # add ocean basemap
+  addProviderTiles("Esri.OceanBasemap", options = providerTileOptions(
+    variant= "Ocean/World_Ocean_Base")) %>%
+  
+  # add another layer with place names
+  
+  addProviderTiles("Esri.OceanBaseMap", 
+                   options = providerTileOptions(
+                     variant = "Ocean/World_Ocean_Reference"
+                   )) %>%
+  addScaleBar(position = 'bottomright') 
 
- # mapshot(surveymap, file = paste0(target_dir, "/", date, "map.png")#,
-    #      remove_controls = c("homeButton", "layersControl",  "easyButton", "drawToolbar")
-  #        )
 
+
+saveWidget(surveymap, paste0(target_dir, "/", text.date, "webshot.html"), selfcontained = FALSE)
+webshot(paste0(target_dir, "/", text.date, "webshot.html"), file = paste0(target_dir, "/", text.date, "leaflet_map.png"), 
+        vwidth = 1400, vheight = 1200)
 
